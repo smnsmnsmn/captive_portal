@@ -5,6 +5,6 @@ A (very) simple evil twin access point captive portal suite. Can also be used as
 
 Make sure you have installed: go, hostapd, dnsmasq, iptables, macchanger
 
-Usage: ./portal.sh <evil iface> <internet iface> <ssid>
+Usage: ./portal.sh evil-iface internet-iface ssid
 
 
